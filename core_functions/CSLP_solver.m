@@ -22,14 +22,21 @@ function problem = CSLP_solver(problem_in)
 %--Modifications
 %  08/04/24 a single solver for problem with/without path constraints
 %  10/04/24 some codes are only evaluated in the first iteration
-%% check iteration and extract solver parameters
+%  11/04/24 specify linprog options in the first iteration
+%  18/04/24 add min/max option. switch to trust region update rule by doi
+%  10.1137/030602563 Eq (3.4)
+
+%% check problem and extract solver parameters
 problem   = problem_in;
+
 iter      = problem.solver.iter;             % current iteration
 if iter >= problem.solver.iter_max
-    problem.solved = 0; % maximum iterations reached
+    problem.solved = 0;                      % maximum iterations reached
     return
 end
-
+if iter == 1
+    check_problem(problem_in);               % check problem structure
+end
 iter_key  = problem.solver.iter_key;         % TR shrinking start iteration
 gamma     = problem.solver.gamma;            % penalty weight of linearized constraints
 gamma_tr  = problem.solver.gamma_tr;         % penalty weight of TRs
@@ -39,8 +46,8 @@ delta_s   = problem.solver.delta_s;          % TR shrinking factor
 
 problem.history.delta_max(iter) = delta_max; % record current max TR size
 %% add a temp field in the problem for saving some intermediate vars
-if ~isfield(problem,'temp')
-    problem.temp = [];
+if ~isfield(problem,'tmp')
+    problem.tmp = [];
 else
     % extract temp vars
     no_path_cons = problem.tmp.no_path_cons;
@@ -52,6 +59,7 @@ else
     M = problem.tmp.M;
     lb0 = problem.tmp.lb0;
     ub0 = problem.tmp.ub0;
+    solver_options = problem.tmp.solver_options;
 end
 
 %% force TR penalty weight to be small after a certain iteration
@@ -59,7 +67,7 @@ if iter > iter_key
     gamma_tr = max(1e-5, gamma_tr * gamma_tr_s);
     problem.solver.gamma_tr = gamma_tr;
     % accept ratio
-    eta = 0;
+    eta = -1;
 else
     eta = -10; % accept poor iterations in the initial phase (exploration phase)
 end
@@ -67,7 +75,7 @@ end
 % the vector z = [dtf,dx1,dx2,...,dxN,du1,du2,...,duN]
 [problem.zInit, problem.index.tf, problem.index.X, problem.index.U] = pack_opt_var(problem);
 %% calculate output Y, defects E, and constraints C of the current solution
-if ~isfield(problem.temp,'no_path_cons')
+if ~isfield(problem.tmp,'no_path_cons')
     no_path_cons = problem.nOutput == 0 || all(isinf([problem.bounds.y_low;problem.bounds.y_upp]));
     problem.tmp.no_path_cons = no_path_cons;
 end
@@ -91,7 +99,7 @@ else
         dCdz = problem.solution.dCdz;
     end
     % select non-inf elements in C and dCdz
-    if ~isfield(problem.temp, 'Y_bound')
+    if ~isfield(problem.tmp, 'Y_bound')
         problem.tmp.Y_bound = [repmat(problem.bounds.y_low, problem.nGrid, 1);...
             repmat(problem.bounds.y_upp, problem.nGrid, 1)];
     end
@@ -107,12 +115,12 @@ if ~isfield(problem.scale, 'z')
     problem.scale.z(problem.index.U) = repmat(problem.scale.u, 1, problem.nGrid);
 end
 
-if ~isfield(problem.temp, 'scale_e')
+if ~isfield(problem.tmp, 'scale_e')
     scale_e = repmat(problem.scale.x, problem.nGrid-1, 1);
     problem.tmp.scale_e = scale_e;
 end
 
-if ~no_path_cons && ~isfield(problem.temp, 'scale_Y')
+if ~no_path_cons && ~isfield(problem.tmp, 'scale_Y')
     scale_Y = repmat(problem.scale.y, 2*problem.nGrid, 1);
     problem.tmp.scale_Y = scale_Y;
 end
@@ -153,11 +161,27 @@ end
 f0 = zeros(N_Zall, 1);
 if problem.type == 0   % min tf
     tf0 = problem.zInit(problem.index.tf);
-    f0(problem.index.tf) = 1;
+    if isfield(problem, 'min_max')
+        if strcmp(problem.min_max,'max')
+            f0(problem.index.tf) = -1;
+        else
+            f0(problem.index.tf) = 1;
+        end
+    else
+        f0(problem.index.tf) = 1;
+    end
 else                   % min lag int
     Lint_f_Idx = problem.index.X(problem.nState, problem.nGrid);
     Lint_f = problem.zInit(Lint_f_Idx);
-    f0(Lint_f_Idx) = 1;
+    if isfield(problem, 'min_max')
+        if strcmp(problem.min_max,'max')
+            f0(Lint_f_Idx) = -1;
+        else
+            f0(Lint_f_Idx) = 1;
+        end
+    else
+        f0(Lint_f_Idx) = 1;
+    end
 end
 
 % % penalty cost -- 1-norm of constr and trust region penalties
@@ -257,13 +281,17 @@ b_eq = sparse(b_eq);
 
 switch problem.solver.lp_solver
     case 'matlab_linprog'
-        options = optimoptions('linprog','Algorithm','interior-point','OptimalityTolerance',1e-6,'ConstraintTolerance',1e-5);
-        [Zall_opt_s,fval1,exitflag1,output1]  = linprog(f_vec_s,A_ieq_s,...
-            b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,options);
+        if ~isfield(problem.tmp,'solver_options')
+            solver_options = optimoptions('linprog','Algorithm','interior-point',...
+                'OptimalityTolerance',1e-6,'ConstraintTolerance',1e-5);
+            problem.tmp.solver_options = solver_options;
+        end
+        [Zall_opt_s,~,~,~]  = linprog(f_vec_s,A_ieq_s,...
+            b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,solver_options);
     case 'gorubi_linprog'
-        options.Display = 'off';
-        [Zall_opt_s,fval1,exitflag1,output1]  = gurobi_linprog(f_vec_s,...
-            A_ieq_s,b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,options);
+        solver_options.Display = 'off';
+        [Zall_opt_s,~,~,~]  = gurobi_linprog(f_vec_s,...
+            A_ieq_s,b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,solver_options);
     otherwise
         error('Error! Only matlab_linprog and gorubi_linprog are supported.')
 end
@@ -341,24 +369,35 @@ end
 rho = (merit_old_sum - merit_new_sum)/(max(1e-4, merit_old_sum - merit_pre_sum));
 problem.history.rho(iter) = rho;
 %% update maximum trust region for next iteration
+% if rho < 1/4
+%     delta_max_next = 1/4*delta_max;
+%     if iter>1 && problem.history.rho(iter-1) < 0.25
+%         delta_max_next = 1/10*delta_max; % reduce the TR size further
+%         problem.solver.gamma = min(1e3, 2*problem.solver.gamma); % increase penalty weight
+%     end
+%     %     if iter>2 && max(problem.history.rho([iter-1;iter])) < 0.25
+%     %         delta_max_next = 1/30*delta_max; % reduce the TR size further
+%     %         problem.solver.gamma = min(1e3, 5*problem.solver.gamma); % increase penalty weight
+%     %     end
+% elseif rho > 0.91 && abs(step_size - delta_max) < 1e-4
+%     delta_max_next = 2*delta_max;
+% else
+%     delta_max_next = delta_max;
+% end
 
-if rho < 1/4
-    delta_max_next = 1/4*delta_max;
-    if iter>1 && problem.history.rho(iter-1) < 0.25
-        delta_max_next = 1/10*delta_max; % reduce the TR size further
-        problem.solver.gamma = min(1e3, 2*problem.solver.gamma); % increase penalty weight
-    end
-    if iter>2 && max(problem.history.rho([iter-1;iter])) < 0.25
-        delta_max_next = 1/30*delta_max; % reduce the TR size further
-        problem.solver.gamma = min(1e3, 5*problem.solver.gamma); % increase penalty weight
-    end
-elseif rho > 3/4 && abs(step_size - delta_max) < 1e-4
-    delta_max_next = 2*delta_max;
+%% update rule proposed in ''A Note on Trust-Region Radius Update'' 2005
+if rho < 0
+    ratio = 0.5;
+elseif rho < 0.95 
+    ratio = 0.5 + (1 - 0.5)*(rho/0.95)^2;
+elseif abs(step_size - delta_max) < 1e-4
+    ratio = 1.01 + (2 - 1.01)*exp(-((rho - 1)/(0.95 - 1))^2);
 else
-    delta_max_next = delta_max;
+    ratio = 1;
 end
+delta_max_next = ratio * delta_max;
 
-% artificial maximum TR size bound (decreasing with iters)
+%% artificial maximum TR size bound (decreasing with iters)
 delta_max_init = problem.history.delta_max(1);
 iter_excess = max(0, iter - iter_key);
 delta_lim = delta_max_init*(delta_s^iter_excess);

@@ -21,9 +21,7 @@ function [x, y] = GenericRK(method, modelhandle, t_real, x0, u, N_out)
 
 
 %% Butcher Array Selection
-% =========================================================================
-% TODO: Assign the respective Butcher tableaus to matrices a,b depending
-%       on the user-specified "method". 
+%Assign the respective Butcher tableaus to matrices a,b depending on the user-specified "method". 
 switch method
     case 'ForwardEuler'
         a = 0;
@@ -44,62 +42,46 @@ switch method
             0  ,0  ,1 ,0];
         b = [1/6, 1/3, 1/3, 1/6];
 end
-%==========================================================================
 
 %% Initialize Variables
 % Save the number of elements in the Runge Kutta Butcher array b. 
 rkorder = length(b);
 
-%==========================================================================
-% TODO: Calculate an array containing the step size for each integration step
-%       from the time grid vector "t_real".
+% Calculate an array containing the step size for each integration step
+% from the time grid vector "t_real".
 ht = diff(t_real);
-%==========================================================================
 
-%==========================================================================
-% TODO: Calculate the dimensions for the number of states and time
-%       steps and save them in variables.
+% Calculate the dimensions for the number of states and time
+% steps and save them in variables.
 N_states    = size(x0,1);
 N_TS        = length(t_real);
-%==========================================================================
 
-%==========================================================================
-% TODO: Initialize the matrices ("x" (states) and "y" (outputs), returned 
-%       by the RK-integrator) with zeros.
+% Initialize the matrices ("x" (states) and "y" (outputs), returned 
+% by the RK-integrator) with zeros.
 x  = zeros(N_states, N_TS);
 y  = zeros(N_out, N_TS);
-%==========================================================================
 
-%==========================================================================
-% TODO: Initialize two variables ("Fx", "Fy") to store the Runge Kutta
-%       evaluations within one integration step.  
+% Initialize two variables ("Fx", "Fy") to store the Runge Kutta
+% evaluations within one integration step.  
 Fx = zeros(N_states, rkorder);
 Fy = zeros(N_out, rkorder);
-%==========================================================================
-
 %% Runge Kutta Integration Loop (Time Steps)
-%==========================================================================
-% TODO: Write the initial state "x0" in the respective column of the state
-%       matrix "x".
-x(:,1) = x0;
-%==========================================================================
 
+% Write the initial state "x0" in the respective column of the state
+% matrix "x".
+x(:,1) = x0;
 
 % Use a for-block to go through all integration time steps.
 for i = 2:N_TS
-    %======================================================================
-    % TODO: Calculate the current time "ind_timestep" step, the current 
-    %       step size "ht_ind", the current state "x_ind" and the current
-    %       control "u_ind"
+    % Calculate the current time "ind_timestep" step, the current 
+    % step size "ht_ind", the current state "x_ind" and the current
+    % control "u_ind"
     ind_timestep = i-1;
     ht_ind       = ht(ind_timestep);
     x_ind        = x(:,ind_timestep);
-    u_ind        = u(:,ind_timestep);
-    %======================================================================
-    
+    u_ind        = u(:,ind_timestep);    
     % Runge Kutta Internal Loop (Within One Time Step)  
-    %======================================================================
-    % TODO: Calculate the internal function evaluations ("Fx", "Fy") using
+    % Calculate the internal function evaluations ("Fx", "Fy") using
     %       the butcher arrays defined above. Use the temporary variable
     %       "x_tmp" and the current control u_ind to call the model-function:
     %       modelhandle(x_tmp, u_ind).
@@ -116,10 +98,7 @@ for i = 2:N_TS
             Fx(:,jj) = modelhandle(x_tmp, u_ind);
         end
     end
-    %======================================================================
-
-    %======================================================================
-    % TODO: Use the computed internal function evaluations to calculate the
+    % Use the computed internal function evaluations to calculate the
     %       state derivatives "xdot" which will later-on be used to perform
     %       the integration step. Also, calculate the current output "y"
     xdot = zeros(size(x0));
@@ -129,21 +108,15 @@ for i = 2:N_TS
             y(:, ind_timestep)  = y(:, ind_timestep) + b(jj) * Fy(:,jj);
         end
     end
-    %======================================================================
-
-    %======================================================================
-    % TODO: Perform the integration step to obtain the next state.
+    % Perform the integration step to obtain the next state.
     x(:,i) = x_ind + ht_ind * xdot;
-    %======================================================================
 end
 
-%==========================================================================
-% TODO: If the model has outputs get the output for the last time step by
+% If the model has outputs get the output for the last time step by
 %       one additional model evaluation.
 if N_out
     [~, y(:,N_TS)] = modelhandle(x(:,N_TS), u(:,N_TS));
 else
     y = [];
 end
-%==========================================================================
 end
