@@ -55,6 +55,7 @@ else
     if ~no_path_cons
         scale_Y = problem.tmp.scale_Y;
     end
+    scaling_Z = problem.tmp.scaling_Z;
     S_Z_inv = problem.tmp.S_Z_inv;
     M = problem.tmp.M;
     lb0 = problem.tmp.lb0;
@@ -67,7 +68,7 @@ if iter > iter_key
     gamma_tr = max(1e-5, gamma_tr * gamma_tr_s);
     problem.solver.gamma_tr = gamma_tr;
     % accept ratio
-    eta = -1;
+    eta = 0;
 else
     eta = -10; % accept poor iterations in the initial phase (exploration phase)
 end
@@ -152,6 +153,7 @@ if ~isfield(problem.tmp, 'S_Z_inv')
     scaling_Z = [problem.scale.z; scaling_EQ_v; scaling_EQ_w; scaling_IEQ_t; ones(N_tr, 1)];
     S_Z_inv = diag(1./scaling_Z);
     problem.tmp.S_Z_inv = S_Z_inv;
+    problem.tmp.scaling_Z = scaling_Z;
 end
 %% construct the subproblem, cost function
 % % real cost J
@@ -193,7 +195,7 @@ f_vec_s = S_Z_inv*(f0 + f1);                           % total penalty cost
 %% construct the subproblem, EQ/IEQ constraints
 % % equality constraints, A_eq_s*Z_s = b_eq
 A_eq_s = [A, eye(N_EQ), -eye(N_EQ), zeros(N_EQ, N_IE), zeros(N_EQ, N_tr)]*S_Z_inv;
-b_eq = e;
+b_eq_s = e;
 
 % % A_ieq_s*Z_s <= b_ieq
 if ~isfield(problem.tmp, 'M')
@@ -213,17 +215,19 @@ if ~no_path_cons
     % 1   -dCdz*dz - t <= C0
     % 2   -dz - M*delta_all <= 0
     % 3    dz - M*delta_all <= 0
-    A_ieq_s = [-c_z, zeros(N_IE, N_EQ), zeros(N_IE, N_EQ), -eye(N_IE), zeros(N_IE, N_tr);
-        -eye(N_z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M;
-        eye(N_z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M];
-    b_ieq = [c; zeros(2*N_z,1)];
+    A_ieq = [-c_z, zeros(N_IE, N_EQ), zeros(N_IE, N_EQ), -eye(N_IE), zeros(N_IE, N_tr);
+     -diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M;
+      diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M];
+    A_ieq_s = A_ieq*S_Z_inv;
+    b_ieq_s = [c; zeros(2*N_z,1)];
 else
     % TWO groups of inequalities
-    % 1   -dz - M*delta_all <= 0
-    % 2    dz - M*delta_all <= 0
-    A_ieq_s = [-eye(N_z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M;
-        eye(N_z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M];
-    b_ieq = zeros(2*N_z,1);
+    % 1   -dz_s - M*delta_all <= 0
+    % 2    dz_s - M*delta_all <= 0
+    A_ieq = [-diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M;
+              diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M];
+    A_ieq_s = A_ieq*S_Z_inv;
+    b_ieq_s = zeros(2*N_z,1);
 end
 %% construct the subproblem, box bounds
 % % box bounds for z
@@ -264,34 +268,37 @@ end
 % lb and ub for incrementals dz
 lb = lb0 - problem.zInit;
 ub = ub0 - problem.zInit;
-% scaled lb and ub for dz
-lb_s = lb.*problem.scale.z;
-ub_s = ub.*problem.scale.z;
-
-% % add box bounds for artifical slack variables and trust regions
-lb_s1 = [lb_s; zeros(2*N_EQ, 1); zeros(N_IE, 1); zeros(N_tr, 1)];
-ub_s1 = [ub_s; 1000*ones(2*N_EQ, 1); 1000*ones(N_IE, 1); ones(N_tr, 1)*delta_max];
+% add box bounds for artifical slack variables and trust regions
+lb_Z = [lb; zeros(2*N_EQ, 1); zeros(N_IE, 1); zeros(N_tr, 1)];
+ub_Z = [ub; 1000*ones(2*N_EQ, 1); 1000*ones(N_IE, 1); ones(N_tr, 1)*delta_max];
 % use 1000 instead of inf to avoid unboundness issue
+% scaled lb and ub for Z_s
+lb_Zs = lb_Z.*scaling_Z;
+ub_Zs = ub_Z.*scaling_Z;
+
 %% call the linear programming solver
 % sparse matrices
 A_ieq_s =  sparse(A_ieq_s);
-b_ieq = sparse(b_ieq);
+b_ieq_s = sparse(b_ieq_s);
 A_eq_s = sparse(A_eq_s);
-b_eq = sparse(b_eq);
+b_eq_s = sparse(b_eq_s);
 
 switch problem.solver.lp_solver
     case 'matlab_linprog'
         if ~isfield(problem.tmp,'solver_options')
             solver_options = optimoptions('linprog','Algorithm','interior-point',...
-                'OptimalityTolerance',1e-6,'ConstraintTolerance',1e-5);
+                'OptimalityTolerance',1e-6,'ConstraintTolerance',1e-5,'Display','off');
             problem.tmp.solver_options = solver_options;
         end
-        [Zall_opt_s,~,~,~]  = linprog(f_vec_s,A_ieq_s,...
-            b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,solver_options);
+        [Zall_opt_s,fval,exitflag,output,lambda]  = linprog(f_vec_s,A_ieq_s,...
+            b_ieq_s,A_eq_s, b_eq_s,lb_Zs,ub_Zs,solver_options);
     case 'gorubi_linprog'
-        solver_options.Display = 'off';
+        if ~isfield(problem.tmp,'solver_options')
+            solver_options.Display = 'off';
+            problem.tmp.solver_options = solver_options;
+        end
         [Zall_opt_s,~,~,~]  = gurobi_linprog(f_vec_s,...
-            A_ieq_s,b_ieq,A_eq_s, b_eq,lb_s1,ub_s1,solver_options);
+            A_ieq_s,b_ieq_s,A_eq_s, b_eq_s,lb_Zs,ub_Zs,solver_options);
     otherwise
         error('Error! Only matlab_linprog and gorubi_linprog are supported.')
 end
@@ -387,7 +394,7 @@ problem.history.rho(iter) = rho;
 
 %% update rule proposed in ''A Note on Trust-Region Radius Update'' 2005
 if rho < 0
-    ratio = 0.5;
+    ratio = max(0.1, 0.5 + 0.05*rho);
 elseif rho < 0.95 
     ratio = 0.5 + (1 - 0.5)*(rho/0.95)^2;
 elseif abs(step_size - delta_max) < 1e-4
@@ -460,6 +467,10 @@ if cons_vio <= problem.solver.constr_tol
         problem.solved = 2; % dz within step tolerance and constraint violation within tolerance
     end
 else
-    problem.solved = -1; % no feasible solution found
+    if step_size <= problem.solver.step_tol
+        problem.solved = 3; % dz within step tolerance and constraints are still violated
+    else
+        problem.solved = -1; % no feasible solution found yet, need more iteration
+    end
 end
 end

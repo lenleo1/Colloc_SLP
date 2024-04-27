@@ -15,7 +15,7 @@ problem.bounds.x_low = [-100*ones(12, 1); 0];
 problem.bounds.x_upp = [100*ones(12, 1); 10];
 problem.bounds.xIBC_low = [zeros(12,1); 0];
 problem.bounds.xIBC_upp = [zeros(12,1); 0];
-problem.bounds.xFBC_low = [10; zeros(11,1); 0.1];
+problem.bounds.xFBC_low = [10; zeros(11,1); 0.5];
 problem.bounds.xFBC_upp = [10; zeros(11,1); 10];
 problem.bounds.u_low = [0; 0; 0; 0];
 problem.bounds.u_upp = [1; 1; 1; 1];
@@ -41,26 +41,26 @@ for k = 1:problem.nGrid
 end
 
 %% scale
-problem.scale.tf = 1;
+problem.scale.tf = 2;
 problem.scale.x = [0.1; 1; 1; 10;  1;  5;    0.1; 1;  1;  1; 0.2; 1; 1];
 %                 [x,  y, z, pitch,roll,yaw, dx,  dy, dz, q,  p,  r; lag_int]
 problem.scale.u = ones(4,1);
 problem.scale.y = 1;
 
 %% solver settings
-problem.solver.lp_solver = 'matlab_linprog';
+problem.solver.lp_solver = 'gorubi_linprog';
 problem.solver.iter_key = 6;
 problem.solver.iter_max = 25;
 problem.solver.delta_max = 5;
-problem.solver.delta_s = 0.6;
+problem.solver.delta_s = 0.7;
 problem.solver.gamma = 100;
-problem.solver.gamma_tr = 0.1;
-problem.solver.gamma_tr_s = 0.7;
+problem.solver.gamma_tr = 0.5;
+problem.solver.gamma_tr_s = 0.8;
 problem.solver.constr_tol = 1e-6;
-problem.solver.opt_tol = 1e-4;
-problem.solver.step_tol = 1e-5;
+problem.solver.opt_tol = 1e-5;
+problem.solver.step_tol = 1e-4;
 %% loop begin
-iter_num = 50;
+iter_num = 24;
 problem.history.delta_max = nan(iter_num,1);
 problem.history.step_size = nan(iter_num,1);
 problem.history.J = nan(iter_num,1);
@@ -71,6 +71,7 @@ problem.history.EQ_vio = nan(iter_num,1);
 problem.history.IE_vio = nan(iter_num,1);
 
 problem.solved = nan;
+tic
 for iter = 1:iter_num
     problem.solver.iter = iter;
     problem = CSLP_solver(problem);
@@ -83,7 +84,13 @@ for iter = 1:iter_num
     elseif problem.solved == 2
         disp('Step size was less than StepTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
+    elseif problem.solved == 3
+        disp('Step size was less than StepTolerance, but maximum constraint violation exceeds ConstraintTolerance.');
+        break;
+    else
+        disp('continue with the iteration...');
     end
 end
+toc
 %%
-plot_problem;
+% plot_problem;

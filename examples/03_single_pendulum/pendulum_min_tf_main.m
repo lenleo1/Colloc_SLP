@@ -74,15 +74,20 @@ problem.history.EQ_vio = nan(iter_num,1);
 for iter = 1:iter_num
     problem.solver.iter = iter;
     problem = CSLP_solver(problem);
-    if problem.solved == 1
+    if problem.solved == 0
+        disp('Maximum iterations');
+        break;
+    elseif problem.solved == 1
         disp('Local optimality was less than OptimalityTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
     elseif problem.solved == 2
         disp('Step size was less than StepTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
-    elseif problem.solved == 0
-        disp('Maximum iterations');
+    elseif problem.solved == 3
+        disp('Step size was less than StepTolerance, but maximum constraint violation exceeds ConstraintTolerance.');
         break;
+    else
+        disp('continue with the iteration...');
     end
 end
 %%

@@ -13,12 +13,12 @@ fMax = 12; % maximum force
 problem.sys = @(x,u)quad_sys(x,u,m,J,g,d);
 % collocation grid size
 problem.nGrid = 15;
-problem.nState = 6; % [x; y; theta; dx; dy; q] 
+problem.nState = 6; % [x; y; theta; dx; dy; q]
 problem.nControl = 2; % [f1; f2]
 problem.nOutput = 0; %
 
 % Problem bounds
-problem.bounds.Tf_low = 0.5;
+problem.bounds.Tf_low = 0.1;
 problem.bounds.Tf_upp = 5;
 problem.bounds.x_low = [-inf; -inf; -inf; -inf; -inf; -inf];
 problem.bounds.x_upp = [ inf;  inf;  inf;  inf;  inf;  inf];
@@ -48,19 +48,19 @@ problem.tf = 2;
 
 % scale
 problem.scale.tf = 1;
-problem.scale.x = [0.2; 0.3; 5; 0.2; 0.2; 1];
+problem.scale.x = [0.2; 1; 1; 0.2; 1; 0.2];
 problem.scale.u = [0.1; 0.1];
 problem.scale.y = [];
 
 %% solver settings
 problem.solver.lp_solver = 'matlab_linprog';
-problem.solver.iter_key = 5;
+problem.solver.iter_key = 6;
 problem.solver.iter_max = 25;
-problem.solver.delta_max = 5;
+problem.solver.delta_max = 10;
 problem.solver.delta_s = 0.7;
 problem.solver.gamma = 100;
-problem.solver.gamma_tr = 0.01;
-problem.solver.gamma_tr_s = 0.7;
+problem.solver.gamma_tr = 0.001;
+problem.solver.gamma_tr_s = 0.9;
 problem.solver.constr_tol = 1e-5;
 problem.solver.opt_tol = 1e-4;
 problem.solver.step_tol = 1e-5;
@@ -80,15 +80,20 @@ problem.history.EQ_vio = nan(iter_num,1);
 for iter = 1:iter_num
     problem.solver.iter = iter;
     problem = CSLP_solver(problem);
-    if problem.solved == 1
+    if problem.solved == 0
+        disp('Maximum iterations');
+        break;
+    elseif problem.solved == 1
         disp('Local optimality was less than OptimalityTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
     elseif problem.solved == 2
         disp('Step size was less than StepTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
-    elseif problem.solved == 0
-        disp('Maximum iterations');
+    elseif problem.solved == 3
+        disp('Step size was less than StepTolerance, but maximum constraint violation exceeds ConstraintTolerance.');
         break;
+    else
+        disp('continue with the iteration...');
     end
 end
 %%

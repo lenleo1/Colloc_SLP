@@ -13,7 +13,7 @@ ylabel('y')
 subplot(2,4,3)
 hold on
 plot(problem.tau_vec*problem.tf,57.3*problem.states(3,:),'linewidth',1)
-ylabel('\theta')
+ylabel('\theta (deg)')
 
 subplot(2,4,4)
 hold on
@@ -28,8 +28,8 @@ ylabel('dy')
 
 subplot(2,4,6)
 hold on
-plot(problem.tau_vec*problem.tf,problem.states(6,:),'linewidth',1)
-ylabel('q')
+plot(problem.tau_vec*problem.tf,57.3*problem.states(6,:),'linewidth',1)
+ylabel('q(deg/s)')
 
 subplot(2,4,7)
 hold on

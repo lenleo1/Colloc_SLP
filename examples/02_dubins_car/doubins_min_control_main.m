@@ -36,7 +36,7 @@ problem.states(:,end) = problem.bounds.xFBC_low;
 
 % scale
 problem.scale.tf = 0.5;
-problem.scale.x = [0.5; 0.5; 1; 0.3];
+problem.scale.x = [0.5; 0.5; 1; 0.2];
 problem.scale.u = [1; 1];
 problem.scale.y = [];
 
@@ -46,7 +46,7 @@ problem.solver.iter_key = 6;
 problem.solver.iter_max = 25;
 problem.solver.delta_max = 5;
 problem.solver.delta_s = 0.6;
-problem.solver.gamma = 1000;
+problem.solver.gamma = 100;
 problem.solver.gamma_tr = 0.1;
 problem.solver.gamma_tr_s = 0.7;
 problem.solver.constr_tol = 1e-5;
@@ -66,15 +66,20 @@ problem.history.EQ_vio = nan(iter_num,1);
 for iter = 1:iter_num
     problem.solver.iter = iter;
     problem = CSLP_solver(problem);
-    if problem.solved == 1
+    if problem.solved == 0
+        disp('Maximum iterations');
+        break;
+    elseif problem.solved == 1
         disp('Local optimality was less than OptimalityTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
     elseif problem.solved == 2
         disp('Step size was less than StepTolerance, and maximum constraint violation was less than ConstraintTolerance.');
         break;
-    elseif problem.solved == 0
-        disp('Maximum iterations');
+    elseif problem.solved == 3
+        disp('Step size was less than StepTolerance, but maximum constraint violation exceeds ConstraintTolerance.');
         break;
+    else
+        disp('continue with the iteration...');
     end
 end
 %%
