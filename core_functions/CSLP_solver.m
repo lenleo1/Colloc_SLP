@@ -25,6 +25,7 @@ function problem = CSLP_solver(problem_in)
 %  11/04/24 specify linprog options in the first iteration
 %  18/04/24 add min/max option. switch to trust region update rule by doi
 %  10.1137/030602563 Eq (3.4)
+%  29/04/2024 EuroGNC Paper submission version
 
 %% check problem and extract solver parameters
 problem   = problem_in;
@@ -64,6 +65,7 @@ else
 end
 
 %% force TR penalty weight to be small after a certain iteration
+% see EUROGNC Paper Eq.(56)
 if iter > iter_key
     gamma_tr = max(1e-5, gamma_tr * gamma_tr_s);
     problem.solver.gamma_tr = gamma_tr;
@@ -83,7 +85,7 @@ end
 if no_path_cons
     % collocation defects: e_hat = e - A*p = 0
     if iter <= 1
-        [e, A] = build_E_jac(problem);
+        [e, A] = build_E_jac(problem); % see Eq.(32) and Eq.(33)
     else
         e = problem.solution.e;
         A = problem.solution.A;
@@ -92,7 +94,7 @@ else
     % collocation defects: e_hat = e - A*p = 0
     % inequalitis: C_hat = C + dCdz*p  >= 0
     if iter <= 1
-        [~, e, A, C, dCdz] = build_Y_E_C_jac(problem);
+        [~, e, A, C, dCdz] = build_Y_E_C_jac(problem); % see Eq.(32) and Eq.(33)
     else
         e = problem.solution.e;
         A = problem.solution.A;
@@ -104,8 +106,8 @@ else
         problem.tmp.Y_bound = [repmat(problem.bounds.y_low, problem.nGrid, 1);...
             repmat(problem.bounds.y_upp, problem.nGrid, 1)];
     end
-    problem.index.Y_ninf = ~isinf(problem.tmp.Y_bound);
-    c = C(problem.index.Y_ninf);
+    problem.index.Y_ninf = ~isinf(problem.tmp.Y_bound); % identify non-inf elements
+    c = C(problem.index.Y_ninf);         % remove inf or -inf from C vector
     c_z = dCdz(problem.index.Y_ninf, :);
 end
 %% define the scaling vectors
@@ -127,6 +129,7 @@ if ~no_path_cons && ~isfield(problem.tmp, 'scale_Y')
 end
 %% construct the subproblem, extended optimization variable
 % Zall = [z; v_1,...,v_neq, w_1,...,w_neq, t_1,...,t_nieq, delta_1,...,delta_N+1];
+% see Eq.(54)
 N_X = problem.nState * problem.nGrid;
 N_U = problem.nControl * problem.nGrid;
 N_z = N_X + N_U + 1;
@@ -212,9 +215,9 @@ end
 
 if ~no_path_cons
     % three groups of inequalities
-    % 1   -dCdz*dz - t <= C0
-    % 2   -dz - M*delta_all <= 0
-    % 3    dz - M*delta_all <= 0
+    % 1   dCdz*dz + C0 >= 0,  -dCdz*dz - C0 <= 0<=t,  -dCdz*dz - t <= C0, see Eq.(53) 
+    % 2   -dz - M*delta_all <= 0, see Eq.(44)
+    % 3    dz - M*delta_all <= 0, see Eq.(44)
     A_ieq = [-c_z, zeros(N_IE, N_EQ), zeros(N_IE, N_EQ), -eye(N_IE), zeros(N_IE, N_tr);
      -diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M;
       diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), zeros(N_z, N_IE), -M];
@@ -222,8 +225,8 @@ if ~no_path_cons
     b_ieq_s = [c; zeros(2*N_z,1)];
 else
     % TWO groups of inequalities
-    % 1   -dz_s - M*delta_all <= 0
-    % 2    dz_s - M*delta_all <= 0
+    % 1   -dz_s - M*delta_all <= 0, see Eq.(44)
+    % 2    dz_s - M*delta_all <= 0, see Eq.(44)
     A_ieq = [-diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M;
               diag(problem.scale.z), zeros(N_z, N_EQ), zeros(N_z, N_EQ), -M];
     A_ieq_s = A_ieq*S_Z_inv;
@@ -310,7 +313,7 @@ delta_all_new = Zall_opt_s((N_z + 2*N_EQ + N_IE + 1):N_Zall); % no scaling for T
 problem.history.delta_all(iter, :) = delta_all_new;
 %% compute the merit BEFORE and AFTER the solution
 % the merit function is the cost plus gamma*(1-norm of EQ/IEQ violations),
-% trust region penalty term is not included.
+% plus region penalty term.
 % reshape e and C indices
 e_idx = reshape(1:(problem.nGrid-1)*problem.nState, [], (problem.nGrid-1));
 if ~no_path_cons
@@ -338,7 +341,7 @@ else
     delta_all_old = problem.history.delta_all(iter - 1, :);
 end
 Jtr_old = gamma_tr * sum(delta_all_old);
-merit_old_sum = J_old + sum(Jeq_old_vec) + sum(Jieq_old_vec) + Jtr_old;
+merit_old_sum = J_old + sum(Jeq_old_vec) + sum(Jieq_old_vec) + Jtr_old; % see Eq.(57)
 
 % predicted merit after the solution
 if problem.type == 0
@@ -357,7 +360,7 @@ else
     Jieq_pre_vec = 0;
 end
 Jtr_pre = gamma_tr * sum(delta_all_new);
-merit_pre_sum = J + sum(Jeq_pre_vec) + sum(Jieq_pre_vec) + Jtr_pre;
+merit_pre_sum = J + sum(Jeq_pre_vec) + sum(Jieq_pre_vec) + Jtr_pre; % see Eq.(47)
 
 % real merit after the solution
 if ~no_path_cons
@@ -366,7 +369,7 @@ if ~no_path_cons
     Jeq_new_vec = gamma * sum(abs(e_new_scaled), 1);
     C_new_scaled = [problem.scale.y;problem.scale.y].*C_new(C_idx);
     Jieq_new_vec = gamma * sum(max(0, -C_new_scaled), 1);
-    merit_new_sum = J + sum(Jeq_new_vec) + sum(Jieq_new_vec) + Jtr_pre;
+    merit_new_sum = J + sum(Jeq_new_vec) + sum(Jieq_new_vec) + Jtr_pre; % see Eq.(57)
 else
     [e_new, A_new] = build_E_jac(problem, problem.zInit + z_opt);
     e_new_scaled = (problem.scale.x).*e_new(e_idx);
@@ -376,23 +379,7 @@ end
 rho = (merit_old_sum - merit_new_sum)/(max(1e-4, merit_old_sum - merit_pre_sum));
 problem.history.rho(iter) = rho;
 %% update maximum trust region for next iteration
-% if rho < 1/4
-%     delta_max_next = 1/4*delta_max;
-%     if iter>1 && problem.history.rho(iter-1) < 0.25
-%         delta_max_next = 1/10*delta_max; % reduce the TR size further
-%         problem.solver.gamma = min(1e3, 2*problem.solver.gamma); % increase penalty weight
-%     end
-%     %     if iter>2 && max(problem.history.rho([iter-1;iter])) < 0.25
-%     %         delta_max_next = 1/30*delta_max; % reduce the TR size further
-%     %         problem.solver.gamma = min(1e3, 5*problem.solver.gamma); % increase penalty weight
-%     %     end
-% elseif rho > 0.91 && abs(step_size - delta_max) < 1e-4
-%     delta_max_next = 2*delta_max;
-% else
-%     delta_max_next = delta_max;
-% end
-
-%% update rule proposed in ''A Note on Trust-Region Radius Update'' 2005
+% update rule proposed in ''A Note on Trust-Region Radius Update'' 2005
 if rho < 0
     ratio = max(0.1, 0.5 + 0.05*rho);
 elseif rho < 0.95 
@@ -405,6 +392,7 @@ end
 delta_max_next = ratio * delta_max;
 
 %% artificial maximum TR size bound (decreasing with iters)
+% see Eq.(55)
 delta_max_init = problem.history.delta_max(1);
 iter_excess = max(0, iter - iter_key);
 delta_lim = delta_max_init*(delta_s^iter_excess);
